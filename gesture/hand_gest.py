@@ -132,8 +132,9 @@ def process_frame(frame_data):
                 detected_gesture = detect_gesture(hand_landmarks)
                 if detected_gesture in GESTURES:
                     cv2.putText(frame, GESTURES[detected_gesture], (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    engine.say(GESTURES[detected_gesture])
-                    engine.runAndWait()
+                    # engine.say(GESTURES[detected_gesture])
+                    # engine.runAndWait()
+                    # 파이로 보내는 로직 필요
 
 def start_local_server():
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
