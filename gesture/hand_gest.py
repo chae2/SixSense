@@ -1,3 +1,4 @@
+import socket
 import cv2
 import mediapipe as mp
 import pyttsx3
@@ -27,6 +28,7 @@ GESTURES = {
     "little_bit": "조금 사인을 했습니다.",
     "rock_paper_scissors": "가위바위보를 했습니다."
 }
+
 
 def detect_gesture(hand_landmarks):
     # 손목과 손가락 마디 위치 가져오기
@@ -86,7 +88,7 @@ def detect_gesture(hand_landmarks):
             return "number_sign"
         return "unknown"
 
-def main():
+def main(): ## local camera 사용함
     cap = cv2.VideoCapture(0)
     with mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5) as hands:
         while cap.isOpened():
@@ -116,5 +118,42 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
 
+def process_frame(frame_data):
+    nparr = np.frombuffer(frame_data, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    with mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5) as hands:
+        results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        if results.multi_hand_landmarks:
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(
+                    frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+
+                detected_gesture = detect_gesture(hand_landmarks)
+                if detected_gesture in GESTURES:
+                    cv2.putText(frame, GESTURES[detected_gesture], (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    engine.say(GESTURES[detected_gesture])
+                    engine.runAndWait()
+
+def start_local_server():
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind(('0.0.0.0', 9999))
+    server_socket.listen(1)
+    print("Starting Server...")
+
+    conn, addr = server_socket.accept()
+    print(f"RaspberryPi Connected: {addr}")
+
+    while True:
+        data = conn.recv(4096)
+        if not data:
+            break
+        
+        result = process_frame(data)
+        conn.sendall(result.encode())
+    conn.close()
+    server_socket.close()
+
 if __name__ == "__main__":
-    main()
+    # main() # 로컬 실험
+    process_frame() # 라즈베리 파이로 실험
