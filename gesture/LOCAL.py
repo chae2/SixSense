@@ -1,17 +1,12 @@
 import socket
 import cv2
 import mediapipe as mp
-import pyttsx3
 import numpy as np
 
 # Mediapipe 설정
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
 
-# 음성 엔진 설정
-engine = pyttsx3.init()
-
-# 제스처 맵핑
 GESTURES = {
     "waving": "손을 흔들었습니다.",
     "thumbs_up": "엄지를 올렸습니다.",
@@ -29,7 +24,7 @@ GESTURES = {
     "rock_paper_scissors": "가위바위보를 했습니다."
 }
 
-PI_HOST = 'PI_IP'
+PI_HOST = 'RPi_IP'
 PI_PORT = 65432
 
 def detect_gesture(hand_landmarks):
@@ -90,84 +85,46 @@ def detect_gesture(hand_landmarks):
             return "number_sign"
         return "unknown"
 
-def main(): ## local camera 사용함
-    cap = cv2.VideoCapture(0)
-    with mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5) as hands:
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            frame = cv2.flip(frame, 1)
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = hands.process(rgb_frame)
-
-            if results.multi_hand_landmarks:
-                for hand_landmarks in results.multi_hand_landmarks:
-                    mp_drawing.draw_landmarks(
-                        frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-
-                    detected_gesture = detect_gesture(hand_landmarks)
-                    if detected_gesture in GESTURES:
-                        cv2.putText(frame, GESTURES[detected_gesture], (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                        engine.say(GESTURES[detected_gesture])
-                        engine.runAndWait()
-
-            cv2.imshow('Hand Gesture Recognition', frame)
-            if cv2.waitKey(5) & 0xFF == 27:
-                break
-
-    cap.release()
-    cv2.destroyAllWindows()
-
-def process_frame(frame_data):
-    nparr = np.frombuffer(frame_data, np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
+def process_frame(frame):
     with mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5) as hands:
         results = hands.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         if results.multi_hand_landmarks:
             for hand_landmarks in results.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(
-                    frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                return detect_gesture(hand_landmarks)
+    return None
 
-                detected_gesture = detect_gesture(hand_landmarks)
-                if detected_gesture in GESTURES:
-                    gesture_messsage = GESTURES[detected_gesture]
-                    cv2.putText(frame, gesture_message, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-                    send_to_pi(gesture_messsage)
-                    # engine.say(GESTURES[detected_gesture])
-                    # engine.runAndWait()
-                    # 파이로 보내는 로직 필요
+def receive_video_from_pi():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+        server_socket.bind((PI_HOST, PI_PORT))
+        server_socket.listen(1)
+        print(f"Video Server waiting on PORT {PI_PORT}...")
+        conn, _ = server_socket.accept()
+        with conn:
+            buffer = b""
+            while True:
+                data = conn.recv(4096)
+                if not data:
+                    break
+                buffer += data
+                # JPEG 프레임이 끝날 때마다 처리
+                if b'\xff\xd9' in buffer:
+                    frame_data, buffer = buffer.split(b'\xff\xd9')[:2]
+                    frame_data += b'\xff\xd9'
+                    nparr = np.frombuffer(frame_data, np.uint8)
+                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    detected_gesture = process_frame(frame)
+                    if detected_gesture and detected_gesture in GESTURES:
+                        send_gesture_to_pi(GESTURES[detected_gesture])
+                    cv2.imshow("Received Video", frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        break
+            cv2.destroyAllWindows()
 
-def send_to_pi(message):
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.connect((HOST, PORT))
-            s.sendall(message.encode('utf-8'))
-    except Exception as e:
-        print(f"error occured during sending message: {e}")
-
-
-def start_local_server():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(('0.0.0.0', 9999))
-    server_socket.listen(1)
-    print("Starting Server...")
-
-    conn, addr = server_socket.accept()
-    print(f"RaspberryPi Connected: {addr}")
-
-    while True:
-        data = conn.recv(4096)
-        if not data:
-            break
-        
-        result = process_frame(data)
-        conn.sendall(result.encode())
-    conn.close()
-    server_socket.close()
+def send_gesture_to_pi(gesture_message):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+        client_socket.connect((PI_HOST, PI_PORT + 1))
+        client_socket.sendall(gesture_message.encode('utf-8'))
 
 if __name__ == "__main__":
-    # main() # 로컬 실험
-    process_frame() # 라즈베리 파이로 실험
+    receive_video_from_pi()
