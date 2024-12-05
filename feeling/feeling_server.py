@@ -8,9 +8,14 @@ import cv2
 app = Flask(__name__)
 socketio = SocketIO(app)
 
+# 이전 감정을 저장하기 위한 변수
+previous_emotion = None
+
 # 클라이언트로부터 이미지를 받는 웹소켓 핸들러
 @socketio.on('upload_image')
 def handle_image(data):
+    global previous_emotion
+
     # Base64로 전송된 이미지 데이터
     img_data = base64.b64decode(data['image'])
     
@@ -27,8 +32,13 @@ def handle_image(data):
         print(f"Error analyzing image: {e}")
         emotion = "unknown"
 
-    # 감정 분석 결과를 Raspberry Pi로 전송
-    emit('emotion_result', {'emotion': emotion})
+    # 감정이 변경되었을 경우에만 전송
+    if emotion != previous_emotion:
+        previous_emotion = emotion  # 이전 감정을 업데이트
+        print(f"Emotion changed to: {emotion}. Sending to Raspberry Pi...")
+        emit('emotion_result', {'emotion': emotion})
+    else:
+        print(f"Emotion ({emotion}) is unchanged. Not sending.")
 
 # 기본 라우트
 @app.route('/')
