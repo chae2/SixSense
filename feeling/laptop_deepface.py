@@ -10,7 +10,7 @@ cap = cv2.VideoCapture(stream_url)
 previous_emotion = None  # 이전 감지된 표정
 
 def send_emotion_to_server(emotion, confidence):
-    url = "http://<RaspberryPi_IP>:5000/update_emotion"  # Flask 서버 주소
+    url = "http://192.168.1.7:5000/update_emotion"  # Flask 서버 주소
     headers = {'Content-Type': 'application/json'}
     data = {
         'emotion': emotion,
