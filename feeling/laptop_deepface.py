@@ -1,32 +1,19 @@
 import requests
 from deepface import DeepFace
 import cv2
-import json
+import threading
+from flask import Flask, jsonify
 
 # MJPEG 스트림 URL
 stream_url = "http://192.168.1.7:8000/stream.mjpg"
 cap = cv2.VideoCapture(stream_url)
 
-previous_emotion = None  # 이전 감지된 표정
+# 표정 감지 값 저장
+current_emotion = None
 
-def send_emotion_to_server(emotion, confidence):
-    url = "http://192.168.1.7:5000/update_emotion"  # Flask 서버 주소
-    headers = {'Content-Type': 'application/json'}
-    data = {
-        'emotion': emotion,
-        'confidence': confidence
-    }
-    response = requests.post(url, headers=headers, json=data)
-    
-    if response.status_code == 200:
-        print(f"Emotion {emotion} sent to server.")
-    else:
-        print(f"Error sending emotion to server: {response.text}")
-
-if not cap.isOpened():
-    print("스트림을 열 수 없습니다.")
-else:
-    print("스트림 열림 성공")
+# 표정 감지 및 업데이트 함수
+def emotion_detection():
+    global current_emotion
     while True:
         ret, frame = cap.read()
         if not ret:
@@ -41,22 +28,50 @@ else:
             if results:
                 result = results[0]
                 dominant_emotion = result['dominant_emotion']
-                confidence = result['face_confidence']
                 
-                print(f"Dominant Emotion: {dominant_emotion}, Confidence: {confidence:.2f}")
-                
-                # 표정이 이전과 다를 때만 서버로 전송
-                if dominant_emotion != previous_emotion:
-                    send_emotion_to_server(dominant_emotion, confidence)
-                    previous_emotion = dominant_emotion
-                    
+                # 표정이 변경될 때만 저장
+                if dominant_emotion != current_emotion:
+                    current_emotion = dominant_emotion
+                    print(f"Updated Emotion: {current_emotion}")
+
         except Exception as e:
             print(f"DeepFace Error: {e}")
+        
+# Flask 서버 코드
+app = Flask(__name__)
 
-        # OpenCV 창에 영상 출력
-        cv2.imshow('Stream', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+@app.route('/get_current_emotion', methods=['GET'])
+def get_current_emotion():
+    return jsonify({"emotion": current_emotion})
 
-cap.release()
-cv2.destroyAllWindows()
+# 라즈베리파이로 표정 값 전송 함수
+def send_emotion_to_raspberrypi():
+    global current_emotion
+    while True:
+        if current_emotion:
+            try:
+                # 라즈베리파이 Flask 서버로 표정 값 전송
+                url = "http://192.168.1.100:5000/update_emotion"  # 라즈베리파이 Flask 서버 주소
+                headers = {'Content-Type': 'application/json'}
+                data = {
+                    'emotion': current_emotion
+                }
+                response = requests.post(url, headers=headers, json=data)
+                if response.status_code == 200:
+                    print(f"Emotion {current_emotion} sent to Raspberry Pi Flask server.")
+            except requests.exceptions.RequestException as e:
+                print(f"Error sending emotion to Raspberry Pi: {e}")
+        
+if __name__ == '__main__':
+    # 표정 감지 쓰레드 시작
+    emotion_thread = threading.Thread(target=emotion_detection)
+    emotion_thread.daemon = True
+    emotion_thread.start()
+    
+    # 라즈베리파이로 표정 값 전송 쓰레드 시작
+    send_emotion_thread = threading.Thread(target=send_emotion_to_raspberrypi)
+    send_emotion_thread.daemon = True
+    send_emotion_thread.start()
+    
+    # Flask 서버 실행
+    app.run(host='0.0.0.0', port=5000)

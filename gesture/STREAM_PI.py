@@ -23,5 +23,14 @@ def update_emotion():
     
     return jsonify({"status": "success", "message": "Gesture Detected."})
 
+# 표정 업데이트 엔드포인트
+@app.route('/update_emotion', methods=['POST'])
+def update_emotion():
+    global emotion_data
+    data = request.get_json()
+    emotion_data = data.get('emotion', 'Unknown')
+    print(f"Received emotion: {emotion_data}")
+    return jsonify({"status": "success", "emotion": emotion_data})
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)  # 5000 포트로 서버 실행
