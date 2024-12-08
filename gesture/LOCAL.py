@@ -1,11 +1,16 @@
-import socket
+# import socket
 import cv2
 import mediapipe as mp
 import numpy as np
+import requests
 
 # Mediapipe 설정
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
+
+# MJPEG 스트림 url
+stream_url = "http://192.168.1.7:8000/stream.mjpg"
+cap = cv2.VideoCapture(stream_url)
 
 GESTURES = {
     "waving": "손을 흔들었습니다.",
@@ -24,8 +29,8 @@ GESTURES = {
     "rock_paper_scissors": "가위바위보를 했습니다."
 }
 
-PI_HOST = 'RPi_IP'
-PI_PORT = 65432
+PI_HOST = '192.168.1.7' #'172.20.10.4'
+PI_PORT = 8000 #65432
 
 def detect_gesture(hand_landmarks):
     # 손목과 손가락 마디 위치 가져오기
@@ -94,37 +99,77 @@ def process_frame(frame):
                 return detect_gesture(hand_landmarks)
     return None
 
-def receive_video_from_pi():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
-        server_socket.bind((PI_HOST, PI_PORT))
-        server_socket.listen(1)
-        print(f"Video Server waiting on PORT {PI_PORT}...")
-        conn, _ = server_socket.accept()
-        with conn:
-            buffer = b""
-            while True:
-                data = conn.recv(4096)
-                if not data:
-                    break
-                buffer += data
-                # JPEG 프레임이 끝날 때마다 처리
-                if b'\xff\xd9' in buffer:
-                    frame_data, buffer = buffer.split(b'\xff\xd9')[:2]
-                    frame_data += b'\xff\xd9'
-                    nparr = np.frombuffer(frame_data, np.uint8)
-                    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                    detected_gesture = process_frame(frame)
-                    if detected_gesture and detected_gesture in GESTURES:
-                        send_gesture_to_pi(GESTURES[detected_gesture])
-                    cv2.imshow("Received Video", frame)
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        break
-            cv2.destroyAllWindows()
-
 def send_gesture_to_pi(gesture_message):
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        client_socket.connect((PI_HOST, PI_PORT + 1))
-        client_socket.sendall(gesture_message.encode('utf-8'))
+    url = "http://192.168.1.7:5000/detect_gesture"
+    headers = {'Content-Type': 'application/json'}
+    data={
+        'gesture': gesture_message
+    }
+    response = requests.post(url, headers=headers, json=data)
 
-if __name__ == "__main__":
-    receive_video_from_pi()
+    if response.status_code==200:
+        print(f"Gesture {gesture_message} sent to pi server.")
+    else:
+        print(f"Error sending gesture to pi server: {response}")
+    # with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+    #     client_socket.connect((PI_HOST, PI_PORT + 1))
+    #     client_socket.sendall(gesture_message.encode('utf-8'))
+
+if not cap.isOpened():
+    print("Cannot open stream.")
+else:
+    print("Success in opening stream")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            print("Frame reading failed")
+            break
+
+        try:
+            # Mediapipe로 행동 알아차리기
+            detected_gesture = process_frame(frame)
+            if detected_gesture and detected_gesture in GESTURES:
+                print(f"Current Gesture: {GESTURES[detected_gesture]}")
+                send_gesture_to_pi(GESTURES[detected_gesture])
+        except Exception as e:
+            print(f"Mediapipe Error: {e}")
+        
+        # OpenCV 창에 영상 출력
+        cv2.imshow('Stream', frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+cap.release()
+cv2.destroyAllWindows()
+
+# def receive_video_from_pi():
+#     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server_socket:
+#         server_socket.bind((PI_HOST, PI_PORT))
+#         server_socket.listen(1)
+#         print(f"Video Server waiting on PORT {PI_PORT}...")
+#         conn, _ = server_socket.accept()
+#         with conn:
+#             buffer = b""
+#             while True:
+#                 data = conn.recv(4096)
+#                 if not data:
+#                     break
+#                 buffer += data
+#                 # JPEG 프레임이 끝날 때마다 처리
+#                 if b'\xff\xd9' in buffer:
+#                     frame_data, buffer = buffer.split(b'\xff\xd9')[:2]
+#                     frame_data += b'\xff\xd9'
+#                     nparr = np.frombuffer(frame_data, np.uint8)
+#                     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+#                     detected_gesture = process_frame(frame)
+#                     if detected_gesture and detected_gesture in GESTURES:
+#                         send_gesture_to_pi(GESTURES[detected_gesture])
+#                     cv2.imshow("Received Video", frame)
+#                     if cv2.waitKey(1) & 0xFF == ord('q'):
+#                         break
+#             cv2.destroyAllWindows()
+
+
+
+# if __name__ == "__main__":
+#     receive_video_from_pi()
