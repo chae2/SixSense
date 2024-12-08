@@ -12,6 +12,8 @@ mp_drawing = mp.solutions.drawing_utils
 stream_url = "http://192.168.1.7:8000/stream.mjpg"
 cap = cv2.VideoCapture(stream_url)
 
+previous_gesture = None
+
 GESTURES = {
     "waving": "손을 흔들었습니다.",
     "thumbs_up": "엄지를 올렸습니다.",
@@ -130,7 +132,9 @@ else:
             detected_gesture = process_frame(frame)
             if detected_gesture and detected_gesture in GESTURES:
                 print(f"Current Gesture: {GESTURES[detected_gesture]}")
-                send_gesture_to_pi(GESTURES[detected_gesture])
+                if detected_gesture != previous_gesture:
+                    send_gesture_to_pi(GESTURES[detected_gesture])
+                    previous_gesture = detected_gesture
         except Exception as e:
             print(f"Mediapipe Error: {e}")
         

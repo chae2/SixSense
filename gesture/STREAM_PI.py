@@ -3,6 +3,12 @@ import pyttsx3
 
 app = Flask(__name__)
 engine = pyttsx3.init()
+voices = engine.getProperty('voices')
+
+for voice in voices:
+    if 'Korean' in voice.name or '한국어' in voice.name:
+        engine.setProperty('voice', voice.id)
+        break
 
 @app.route('/detect_gesture', methods=['POST'])
 def update_emotion():
