@@ -20,7 +20,7 @@ while True:
 
     if data:  # 값이 들어오면
         # 노트북 서버에 요청 (Flask 서버로 요청)
-        response = requests.get('http://<노트북 서버 주소>/detect_emotion')  # 표정 감지 요청
+        response = requests.get('http://172.20.10.5:5000/get_current_emotion')  # 표정 감지 요청
         emotion_data = response.json()  # 표정 감지 결과 받기
 
         # 표정 감지 결과를 Bluetooth로 전송
