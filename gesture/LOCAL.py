@@ -15,20 +15,20 @@ cap = cv2.VideoCapture(stream_url)
 previous_gesture = None
 
 GESTURES = {
-    "waving": "손을 흔들었습니다.",
-    "thumbs_up": "엄지를 올렸습니다.",
-    "thumbs_down": "엄지를 내렸습니다.",
-    "pointing": "손가락을 휘저었습니다.",
-    "ok_sign": "오케이 표시를 했습니다.",
-    "number_sign": "숫자를 표시했습니다.",
-    "v_sign": "V 사인을 했습니다.",
-    "palm_up": "손바닥을 위로 올렸습니다.",
-    "hands_clap": "손을 모았습니다.",
-    "fist": "주먹을 쥐었습니다.",
-    "fingers_fold": "손가락을 접었다 폈습니다.",
-    "drawing_square": "네모를 그렸습니다.",
-    "little_bit": "조금 사인을 했습니다.",
-    "rock_paper_scissors": "가위바위보를 했습니다."
+    "waving": "currently waving.",
+    "thumbs_up": "thumbs up.",
+    "thumbs_down": "thumbs down.",
+    "pointing": "finger pointing.",
+    "ok_sign": "made an OK sign.",
+    "number_sign": "made a number sign.",
+    "v_sign": "made a V sign.",
+    "palm_up": "palms up.",
+    "hands_clap": "hands together.",
+    "fist": "made a fist.",
+    "fingers_fold": "fingers fold.",
+    "drawing_square": "made a square.",
+    "little_bit": "made a 'little bit' annotation.",
+    "rock_paper_scissors": "did rock scissor paper."
 }
 
 PI_HOST = '192.168.1.7' #'172.20.10.4'
