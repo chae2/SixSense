@@ -6,7 +6,7 @@ app = Flask(__name__)
 GPIO.setmode(GPIO.BCM)  # BCM 모드 사용
 emotion_pins = {
     "angry": 17,       # Angry -> GPIO 17
-    "disgust": 18,     # Disgust -> GPIO 18
+#    "disgust": 18,     # Disgust -> GPIO 18
     "fear": 27,        # Fear -> GPIO 27
     "happy": 22,       # Happy -> GPIO 22
     "sad": 23,         # Sad -> GPIO 23
