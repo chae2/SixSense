@@ -1,10 +1,11 @@
 import requests
 from deepface import DeepFace
-import face_recognition
 import cv2
 import threading
 import time
 from flask import Flask, jsonify, request
+from queue import Queue
+import face_recognition
 
 # MJPEG 스트림 URL
 stream_url = "http://192.168.1.7:8000/stream.mjpg"
@@ -12,63 +13,55 @@ cap = cv2.VideoCapture(stream_url)
 
 # 표정 감지 값 저장
 current_emotion = None
-last_emotion_time = time.time()  # 마지막 표정 감지 시간 기록
-emotion_detection_interval = 3  # 표정 분석 간격 (초)
 
-# 표정 감지 및 업데이트 함수
+# 이미지 캡처를 위한 큐
+image_queue = Queue()
+
+# 표정 감지 함수
 def emotion_detection():
-    global current_emotion, last_emotion_time
+    global current_emotion
+    while True:
+        if not image_queue.empty():
+            frame = image_queue.get()
+            try:
+                # 얼굴 인식 (face_recognition 사용)
+                rgb_frame = frame[:, :, ::-1]  # OpenCV는 BGR, face_recognition은 RGB 사용
+                face_locations = face_recognition.face_locations(rgb_frame)
+
+                if face_locations:
+                    # 첫 번째 얼굴을 선택하여 표정 분석
+                    top, right, bottom, left = face_locations[0]
+                    face_image = frame[top:bottom, left:right]
+
+                    # DeepFace 분석
+                    results = DeepFace.analyze(face_image, actions=['emotion'], enforce_detection=False)
+
+                    if results:
+                        result = results[0]
+                        dominant_emotion = result['dominant_emotion']
+                        emotion_confidence = result['emotion'][dominant_emotion]  # Confidence 값
+                        
+                        # Confidence가 70 이상일 때만 current_emotion 업데이트
+                        if emotion_confidence >= 80:
+                            # 표정이 변경될 때만 저장
+                            if dominant_emotion != current_emotion:
+                                current_emotion = dominant_emotion
+                                print(f"Updated Emotion: {current_emotion} (Confidence: {emotion_confidence:.2f}%)")
+            except Exception as e:
+                print(f"DeepFace Error: {e}")
+        time.sleep(0.1)  # 짧은 대기 시간을 두어 너무 빠르게 반복하지 않도록
+
+# 이미지 캡처 함수
+def capture_images():
     while True:
         ret, frame = cap.read()
         if not ret:
             print("프레임 읽기 실패")
             break
-        
-        # 얼굴 인식
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)  # BGR -> RGB 변환
-        face_locations = face_recognition.face_locations(rgb_frame)
-        
-        if len(face_locations) > 0:
-            # 첫 번째 얼굴 위치를 가져오기 (여러 얼굴을 다룰 수 있음)
-            face_location = face_locations[0]
-            top, right, bottom, left = face_location
-            
-            # 얼굴 영역 표시
-            cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-            
-            # 일정 간격마다 표정 분석을 수행
-            if time.time() - last_emotion_time > emotion_detection_interval:
-                try:
-                    # DeepFace 분석 (얼굴 영역만 분석)
-                    face_image = frame[top:bottom, left:right]
-                    results = DeepFace.analyze(face_image, actions=['emotion'], enforce_detection=False)
-                    
-                    if results:
-                        result = results[0]
-                        dominant_emotion = result['dominant_emotion']
-                        
-                        # 표정이 변경될 때만 저장
-                        if dominant_emotion != current_emotion:
-                            current_emotion = dominant_emotion
-                            print(f"Updated Emotion: {current_emotion}")
-                        
-                        # 결과 화면에 표시
-                        cv2.putText(frame, f"Emotion: {current_emotion}", (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-                        # 마지막 표정 분석 시간 업데이트
-                        last_emotion_time = time.time()
-
-                except Exception as e:
-                    print(f"DeepFace Error: {e}")
-        
-        # 화면에 표시하지 않음
-        # cv2.imshow("Emotion Detection", frame)
-
-        # 'q' 키를 눌러 종료
-        # if cv2.waitKey(1) & 0xFF == ord('q'):
-        #     break
-
-        time.sleep(1)
+        # 이미지 큐에 추가
+        if image_queue.qsize() < 10:  # 큐에 너무 많은 프레임이 쌓이지 않도록 제한
+            image_queue.put(frame)
 
 # Flask 서버 코드
 app = Flask(__name__)
@@ -103,6 +96,11 @@ def emotion():
 
 
 if __name__ == '__main__':
+    # 이미지 캡처 쓰레드 시작
+    capture_thread = threading.Thread(target=capture_images)
+    capture_thread.daemon = True
+    capture_thread.start()
+
     # 표정 감지 쓰레드 시작
     emotion_thread = threading.Thread(target=emotion_detection)
     emotion_thread.daemon = True
