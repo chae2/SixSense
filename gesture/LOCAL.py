@@ -37,7 +37,8 @@ GESTURES = {
     "shaking_head": "shaking head.",
     "raising_hand": "rasing hand."
 }
-nodding_thsd = 12
+nodding_thsd = 14
+shaking_thsd = 20
 
 previous_wrist = np.array([0, 0, 0])
 previous_palm = np.array([0, 0, 0])
@@ -146,13 +147,13 @@ def detect_pose(landmarks, image_height, image_width):
         previous_nose_y = nose[1]
     
     ## Shaking head
-    if abs(nose[0]-(left_shoulder[0]+right_shoulder[0])/2) > 0.2*shoulder_width:
+    if abs(nose[0]-(left_shoulder[0]+right_shoulder[0])/2) > shaking_thsd:
         return "shaking_head"
 
     if left_wrist[1] < left_shoulder[1] or right_wrist[1] <right_shoulder[1]:
         return "raising_hand"
 
-def process_frame(frame, image_height, image_width):
+def process_frame(frame):
     global previous_gesture, previous_pose
 
     with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic, \
