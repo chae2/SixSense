@@ -29,6 +29,7 @@ mp_holistic = mp.solutions.holistic
 previous_gesture = None
 previous_pose = None
 previous_nose_y = None
+previous_eye_y = None
 
 gesture_lock = Lock()
 
@@ -45,8 +46,8 @@ GESTURES = {
     "shaking_head": "shaking head.",
     "raising_hand": "rasing hand."
 }
-nodding_thsd = 14
-shaking_thsd = 20
+nodding_thsd = 16
+shaking_thsd = 22
 
 previous_wrist = np.array([0, 0, 0])
 previous_palm = np.array([0, 0, 0])
@@ -134,33 +135,40 @@ def detect_gesture(hand_landmarks, image_height, image_width):
 
 # 자세 감지 함수
 def detect_pose(landmarks, image_height, image_width):
-    global previous_nose_y
+    global previous_nose_y, previous_eye_y
 
     def to_pixel(landmark):
         return np.array([landmark.x * image_width, landmark.y * image_height])
 
     nose = to_pixel(landmarks[mp_holistic.PoseLandmark.NOSE.value])
+    left_eye = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_EYE.value])
+    right_eye = to_pixel(landmarks[mp_holistic.PoseLandmark.RIGHT_EYE.value])
     left_shoulder = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_SHOULDER.value])
     right_shoulder = to_pixel(landmarks[mp_holistic.PoseLandmark.RIGHT_SHOULDER.value])
     left_wrist = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_WRIST.value])
     right_wrist = to_pixel(landmarks[mp_holistic.PoseLandmark.RIGHT_WRIST.value])
+    
     shoulder_width = np.linalg.norm(left_shoulder - right_shoulder)
+    head_width = np.linalg.norm(left_eye - right_eye)
+    head_center = (left_eye+right_eye)/2
+    
+    ## Shaking head
+    if abs(nose[0]-(left_shoulder[0]+right_shoulder[0])/2) > shaking_thsd and abs(nose[0]-head_center[0])>shaking_thsd:
+        return "shaking_head"
 
-    if previous_nose_y is not None:
+    if left_wrist[1] < left_shoulder[1] or right_wrist[1] < right_shoulder[1]:
+        return "raising_hand"
+    
+    if previous_nose_y is not None and previous_eye_y is not None:
         vertical_movement = abs(nose[1] - previous_nose_y)
-        if vertical_movement > nodding_thsd:
+        vertical_movement2 = abs(head_center[1] - previous_eye_y)
+        if vertical_movement > nodding_thsd and vertical_movement2 > 0.4*nodding_thsd:
             with gesture_lock:
                 previous_nose_y = nose[1]
+                previous_eye_y = head_center[1]
             return "nodding"
     else:
         previous_nose_y = nose[1]
-    
-    ## Shaking head
-    if abs(nose[0]-(left_shoulder[0]+right_shoulder[0])/2) > shaking_thsd:
-        return "shaking_head"
-
-    if left_wrist[1] < left_shoulder[1] or right_wrist[1] <right_shoulder[1]:
-        return "raising_hand"
 
 def process_frame():
     global previous_gesture, previous_pose
