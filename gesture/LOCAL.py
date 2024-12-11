@@ -8,9 +8,6 @@ import threading
 from threading import Lock
 
 os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
-# Mediapipe 설정
-mp_hands = mp.solutions.hands
-mp_drawing = mp.solutions.drawing_utils
 
 # MJPEG 스트림 url
 stream_url = "http://192.168.1.7:8000/stream.mjpg"
@@ -28,6 +25,7 @@ mp_holistic = mp.solutions.holistic
 # 표정 및 제스처 관련 전역 변수
 previous_gesture = None
 previous_pose = None
+previous_nose_x = None
 previous_nose_y = None
 previous_eye_y = None
 
@@ -135,40 +133,36 @@ def detect_gesture(hand_landmarks, image_height, image_width):
 
 # 자세 감지 함수
 def detect_pose(landmarks, image_height, image_width):
-    global previous_nose_y, previous_eye_y
+    global previous_nose_x, previous_nose_y, previous_eye_y
 
     def to_pixel(landmark):
         return np.array([landmark.x * image_width, landmark.y * image_height])
 
     nose = to_pixel(landmarks[mp_holistic.PoseLandmark.NOSE.value])
     left_eye = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_EYE.value])
-    right_eye = to_pixel(landmarks[mp_holistic.PoseLandmark.RIGHT_EYE.value])
     left_shoulder = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_SHOULDER.value])
     right_shoulder = to_pixel(landmarks[mp_holistic.PoseLandmark.RIGHT_SHOULDER.value])
     left_wrist = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_WRIST.value])
     right_wrist = to_pixel(landmarks[mp_holistic.PoseLandmark.RIGHT_WRIST.value])
     
-    shoulder_width = np.linalg.norm(left_shoulder - right_shoulder)
-    head_width = np.linalg.norm(left_eye - right_eye)
-    head_center = (left_eye+right_eye)/2
-    
+    vertical_movement = abs(nose[1] - previous_nose_y) if previous_nose_y is not None else 0
+    vertical_movement2 = abs(left_eye[1] - previous_eye_y) if previous_eye_y is not None else 0
+    horizontal_movement = abs(nose[0]-previous_nose_x) if previous_nose_x is not None else 0
+
     ## Shaking head
-    if abs(nose[0]-(left_shoulder[0]+right_shoulder[0])/2) > shaking_thsd and abs(nose[0]-head_center[0])>shaking_thsd:
+    if abs(nose[0]-(left_shoulder[0]+right_shoulder[0])/2) > shaking_thsd and horizontal_movement > 1.2*nodding_thsd:
         return "shaking_head"
 
     if left_wrist[1] < left_shoulder[1] or right_wrist[1] < right_shoulder[1]:
         return "raising_hand"
     
     if previous_nose_y is not None and previous_eye_y is not None:
-        vertical_movement = abs(nose[1] - previous_nose_y)
-        vertical_movement2 = abs(head_center[1] - previous_eye_y)
-        if vertical_movement > nodding_thsd and vertical_movement2 > 0.4*nodding_thsd:
-            with gesture_lock:
-                previous_nose_y = nose[1]
-                previous_eye_y = head_center[1]
+        if vertical_movement > nodding_thsd and vertical_movement2 > 0.3*nodding_thsd:
             return "nodding"
-    else:
+    with gesture_lock:
+        previous_nose_x = nose[0]
         previous_nose_y = nose[1]
+        previous_eye_y = left_eye[1]
 
 def process_frame():
     global previous_gesture, previous_pose
@@ -190,7 +184,6 @@ def process_frame():
                                 mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
                                 gesture = detect_gesture(hand_landmarks, image_height, image_width)
                                 if gesture and gesture != previous_gesture:
-                                    # print(f"Hand detected: {GESTURES[gesture]}")
                                     with gesture_lock:
                                         previous_gesture = gesture
                                         send_gesture_to_pi(GESTURES[gesture])
@@ -203,7 +196,6 @@ def process_frame():
                         if results.pose_landmarks:
                             pose = detect_pose(results.pose_landmarks.landmark, image_height, image_width)
                             if pose and pose != previous_pose and flag!=1:
-                                # print(f"Pose detected: {GESTURES[pose]}")
                                 with gesture_lock:
                                     send_gesture_to_pi(GESTURES[pose])
                                     previous_pose = pose
