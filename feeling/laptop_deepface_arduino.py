@@ -17,11 +17,8 @@ current_emotion = None
 # 이미지 캡처를 위한 큐
 image_queue = Queue()
 
-# 초기화 시 모델을 한 번만 로드
-emotion_model = DeepFace.build_model('Emotion')
-
 # 아두이노 서버의 IP 주소와 포트
-arduino_server_ip = "192.168.1.100"  # 아두이노 서버의 IP 주소
+arduino_server_ip = "192.168.32.90"  # 아두이노 서버의 IP 주소
 arduino_server_port = 80               # 아두이노 서버의 포트 번호
 
 # 표정 감지 함수
@@ -41,7 +38,7 @@ def emotion_detection():
                     face_image = frame[top:bottom, left:right]
 
                     # DeepFace 분석
-                    results = DeepFace.analyze(face_image, actions=['emotion'], models={'emotion': emotion_model}, enforce_detection=False)
+                    results = DeepFace.analyze(face_image, actions=['emotion'], enforce_detection=False)
 
                     if results:
                         result = results[0]
