@@ -2,14 +2,17 @@ import cv2
 import mediapipe as mp
 import numpy as np
 import requests
+import os
+from queue import Queue
+import threading
+from threading import Lock
 
-# Mediapipe 설정
-mp_hands = mp.solutions.hands
-mp_drawing = mp.solutions.drawing_utils
+os.environ['TF_CPP_MIN_LOG_LEVEL']='2'
 
 # MJPEG 스트림 url
 stream_url = "http://192.168.1.7:8000/stream.mjpg"
 cap = cv2.VideoCapture(stream_url)
+image_queue = Queue()
 
 PI_HOST = '192.168.1.7' #'172.20.10.4'
 PI_PORT = 8000 #65432
@@ -22,7 +25,11 @@ mp_holistic = mp.solutions.holistic
 # 표정 및 제스처 관련 전역 변수
 previous_gesture = None
 previous_pose = None
+previous_nose_x = None
 previous_nose_y = None
+previous_eye_y = None
+
+gesture_lock = Lock()
 
 # Gesture, Pose, and Emotion Constants
 GESTURES = {
@@ -37,8 +44,8 @@ GESTURES = {
     "shaking_head": "shaking head.",
     "raising_hand": "rasing hand."
 }
-nodding_thsd = 14
-shaking_thsd = 20
+nodding_thsd = 16
+shaking_thsd = 22
 
 previous_wrist = np.array([0, 0, 0])
 previous_palm = np.array([0, 0, 0])
@@ -94,8 +101,9 @@ def detect_gesture(hand_landmarks, image_height, image_width):
         palm_distance = np.linalg.norm(palm_position - previous_palm)
         all_up = all(finger_tips[i][1] < finger_mcp[i][1] for i in range(1,5))
 
-        previous_wrist = wrist_position
-        previous_palm = palm_position
+        with gesture_lock:
+            previous_wrist = wrist_position
+            previous_palm = palm_position
 
         # 일정한 거리가 이동한 경우 waving으로 감지
         return wrist_distance > 50 and palm_distance > 50 and all_up
@@ -106,7 +114,6 @@ def detect_gesture(hand_landmarks, image_height, image_width):
     def pointing():
         other_fingers_down = all(finger_tips[i][1] > finger_mcp[i][1] for i in range(2,5))
         return INDEX_TIP[2] < INDEX_DIP[2] and other_fingers_down
-
     if is_thumb_up():
         return "thumbs_up"
     elif is_thumb_down():
@@ -126,67 +133,76 @@ def detect_gesture(hand_landmarks, image_height, image_width):
 
 # 자세 감지 함수
 def detect_pose(landmarks, image_height, image_width):
-    global previous_nose_y
+    global previous_nose_x, previous_nose_y, previous_eye_y
 
     def to_pixel(landmark):
         return np.array([landmark.x * image_width, landmark.y * image_height])
 
     nose = to_pixel(landmarks[mp_holistic.PoseLandmark.NOSE.value])
+    left_eye = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_EYE.value])
     left_shoulder = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_SHOULDER.value])
     right_shoulder = to_pixel(landmarks[mp_holistic.PoseLandmark.RIGHT_SHOULDER.value])
     left_wrist = to_pixel(landmarks[mp_holistic.PoseLandmark.LEFT_WRIST.value])
     right_wrist = to_pixel(landmarks[mp_holistic.PoseLandmark.RIGHT_WRIST.value])
-    shoulder_width = np.linalg.norm(left_shoulder - right_shoulder)
-
-    if previous_nose_y is not None:
-        vertical_movement = abs(nose[1] - previous_nose_y)
-        if vertical_movement > nodding_thsd:
-            previous_nose_y = nose[1]
-            return "nodding"
-    else:
-        previous_nose_y = nose[1]
     
+    vertical_movement = abs(nose[1] - previous_nose_y) if previous_nose_y is not None else 0
+    vertical_movement2 = abs(left_eye[1] - previous_eye_y) if previous_eye_y is not None else 0
+    horizontal_movement = abs(nose[0]-previous_nose_x) if previous_nose_x is not None else 0
+
     ## Shaking head
-    if abs(nose[0]-(left_shoulder[0]+right_shoulder[0])/2) > shaking_thsd:
+    if abs(nose[0]-(left_shoulder[0]+right_shoulder[0])/2) > shaking_thsd and horizontal_movement > 1.2*nodding_thsd:
         return "shaking_head"
 
-    if left_wrist[1] < left_shoulder[1] or right_wrist[1] <right_shoulder[1]:
+    if left_wrist[1] < left_shoulder[1] or right_wrist[1] < right_shoulder[1]:
         return "raising_hand"
+    
+    if previous_nose_y is not None and previous_eye_y is not None:
+        if vertical_movement > nodding_thsd and vertical_movement2 > 0.3*nodding_thsd:
+            return "nodding"
+    with gesture_lock:
+        previous_nose_x = nose[0]
+        previous_nose_y = nose[1]
+        previous_eye_y = left_eye[1]
 
-def process_frame(frame):
+def process_frame():
     global previous_gesture, previous_pose
+    while True:
+        if not image_queue.empty():
+            frame = image_queue.get()
+            try:
+                with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic, \
+                     mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5) as hands:
 
-    with mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5) as holistic, \
-         mp_hands.Hands(min_detection_confidence=0.5, min_tracking_confidence=0.5) as hands:
+                        image_height, image_width, _ = frame.shape
+                        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        flag = 0
 
-            image_height, image_width, _ = frame.shape
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            flag = 0
+                        # Hand Gesture Detection
+                        hand_results = hands.process(rgb_frame)
+                        if hand_results.multi_hand_landmarks:
+                            for hand_landmarks in hand_results.multi_hand_landmarks:
+                                mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+                                gesture = detect_gesture(hand_landmarks, image_height, image_width)
+                                if gesture and gesture != previous_gesture:
+                                    with gesture_lock:
+                                        previous_gesture = gesture
+                                        send_gesture_to_pi(GESTURES[gesture])
+                                        flag = 1
+                                else:
+                                    gesture = None
 
-            # Hand Gesture Detection
-            hand_results = hands.process(rgb_frame)
-            if hand_results.multi_hand_landmarks:
-                for hand_landmarks in hand_results.multi_hand_landmarks:
-                    mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
-                    gesture = detect_gesture(hand_landmarks, image_height, image_width)
-                    if gesture and gesture != previous_gesture:
-                        # print(f"Hand detected: {GESTURES[gesture]}")
-                        previous_gesture = gesture
-                        send_gesture_to_pi(GESTURES[gesture])
-                        flag = 1
-                    else:
-                        gesture = None
-            
-            # Pose Detection
-            results = holistic.process(rgb_frame)
-            if results.pose_landmarks:
-                pose = detect_pose(results.pose_landmarks.landmark, image_height, image_width)
-                if pose and pose != previous_pose and flag!=1:
-                    # print(f"Pose detected: {GESTURES[pose]}")
-                    send_gesture_to_pi(GESTURES[pose])
-                    previous_pose = pose
-                else:
-                    pose = None
+                        # Pose Detection
+                        results = holistic.process(rgb_frame)
+                        if results.pose_landmarks:
+                            pose = detect_pose(results.pose_landmarks.landmark, image_height, image_width)
+                            if pose and pose != previous_pose and flag!=1:
+                                with gesture_lock:
+                                    send_gesture_to_pi(GESTURES[pose])
+                                    previous_pose = pose
+                            else:
+                                pose = None
+            except Exception as e:
+                print(f"Mediapipe Error: {e}")
 
 def send_gesture_to_pi(gesture_message):
     url = "http://192.168.1.7:5000/detect_gesture"
@@ -201,26 +217,54 @@ def send_gesture_to_pi(gesture_message):
     else:
         print(f"Error sending gesture to pi server: {response}")
 
-if not cap.isOpened():
-    print("Cannot open stream.")
-else:
-    print("Success in opening stream")
+def capture_images():
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("Frame reading failed")
+            print("프레임 읽기 실패")
             break
-
-        try:
-            process_frame(frame)
-
-        except Exception as e:
-            print(f"Mediapipe Error: {e}")
+        if image_queue.qsize() < 10:
+            image_queue.put(frame)
         
         # OpenCV 창에 영상 출력
         cv2.imshow('Stream', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+        if cv2.waitKey(33) & 0xFF == ord('q'):
             break
 
-cap.release()
-cv2.destroyAllWindows()
+# if not cap.isOpened():
+#     print("Cannot open stream.")
+# else:
+#     print("Success in opening stream")
+#     while True:
+#         ret, frame = cap.read()
+#         if not ret:
+#             print("Frame reading failed")
+#             break
+
+#         try:
+#             process_frame(frame)
+
+#         except Exception as e:
+#             print(f"Mediapipe Error: {e}")
+        
+#         # OpenCV 창에 영상 출력
+#         cv2.imshow('Stream', frame)
+#         if cv2.waitKey(1) & 0xFF == ord('q'):
+#             break
+
+# cap.release()
+# cv2.destroyAllWindows()
+
+if __name__=='__main__':
+    capture_thread = threading.Thread(target=capture_images)
+    capture_thread.daemon=True
+    capture_thread.start()
+
+    # 감지
+    gesture_thread = threading.Thread(target=process_frame)
+    gesture_thread.daemon=True
+    gesture_thread.start()
+
+    # Keep the main thread running
+    capture_thread.join()
+    gesture_thread.join()
