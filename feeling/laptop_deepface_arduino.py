@@ -73,7 +73,24 @@ def capture_images():
 
 # 아두이노로 감정 값을 전송하는 함수
 def send_emotion_to_arduino(emotion):
-    url = f"http://{arduino_server_ip}:{arduino_server_port}/get_current_emotion?emotion={emotion}"
+    s1 = s2 = s3 = 0
+    if emotion == "happy":
+        s1, s2, s3 = 1, 0, 0
+    elif emotion == "neutral":
+        s1, s2, s3 = 0, 1, 0
+    elif emotion == "angry":
+        s1, s2, s3 = 0, 0, 1
+    elif emotion == "surprise":
+        s1, s2, s3 = 1, 1, 0
+    elif emotion == "fear":
+        s1, s2, s3 = 1, 0, 1
+    elif emotion == "sad":
+        s1, s2, s3 = 0, 1, 1
+    elif emotion == "disgust":
+        s1, s2, s3 = 1, 1, 1
+    
+    url = f"http://{arduino_server_ip}:{arduino_server_port}/servo?s1={s1}&s2={s2}&s3={s3}"
+
     try:
         response = requests.get(url)
         if response.status_code == 200:
